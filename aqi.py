@@ -1,3 +1,4 @@
+import subprocess
 import time, json
 from datetime import datetime
 #import paho.mqtt.publish as publish
@@ -50,6 +51,15 @@ data_pkt_delay = 5.0
 
 #sds011
 sensor = SDS011("/dev/ttyUSB0", use_query_mode=True)
+print("SDS011 sensor info:")
+print(sensor)
+"""
+print("Device ID: ", sensor.device_id)
+print("Device firmware: ", sensor.firmware)
+print("Current device cycle (0 is permanent on): ", sensor.dutycycle)
+print(sensor.workstate)
+print(sensor.reportmode)
+"""
 
 def get_data(n=5):
         print('Measuring in 10sec')
@@ -75,14 +85,34 @@ def conv_aqi(pmt_2_5, pmt_10):
     aqi_10 = aqi.to_iaqi(aqi.POLLUTANT_PM10, str(pmt_10))
     return aqi_2_5, aqi_10
 
-
+"""
+# NOT USED
 def save_log():
     with open("/YOUR PATH/air_quality.csv", "a") as log:
         dt = datetime.now()
         log.write("{},{},{},{},{}\n".format(dt, pmt_2_5, aqi_2_5, pmt_10, aqi_10))
     log.close()
+"""
 
+def send_pi_data(data):
+    # Encode float as int
+    data = int(data * 100)
+    # Encode payload as bytes
+    data_pkt[0] = (data >> 8) & 0xff
+    data_pkt[1] = data & 0xff
+    # Send data packet
+    lora.send_data(data_pkt, len(data_pkt), lora.frame_counter)
+    lora.frame_counter += 1
 
+    display.fill(0)
+    display.text('Sent Data to TTN!',0 , 50, 1)
+
+    print('Data sent to TTN!')
+    display.show()
+    time.sleep(0.5)
+
+"""
+# NOT USED
 channelID = "YOUR CHANNEL ID"
 apiKey = "YOUR WRITE KEY"
 topic = "channels/" + channelID + "/publish/" + apiKey
@@ -91,6 +121,7 @@ mqttHost = "mqtt.thingspeak.com"
 tTransport = "tcp"
 tPort = 1883
 tTLS = None
+"""
 
 while True:
     display.fill(0)
@@ -98,6 +129,14 @@ while True:
     display.text('ECO-SENSORS.CH', 0, 0, 1)
     display.text('Measuring Air Quality', 0, 10, 1)
     display.show()
+
+    # read the raspberry pi cpu load
+    cmd = "top -bn1 | grep load | awk '{printf \"%.1f\", $(NF-2)}'"
+    CPU = subprocess.check_output(cmd, shell = True )
+    CPU = float(CPU)
+    print('CPU load %' + CPU)
+
+    # get SDS011 measures
     pmt_2_5, pmt_10 = get_data()
     #aqi_2_5, aqi_10 = conv_aqi(pmt_2_5, pmt_10)
     print('------------------------------------')
@@ -132,17 +171,15 @@ while True:
         json.dump(data, outfile)
 
     # Sent to TTN
-    """
-    try:
-        #publish.single(topic, payload=tPayload, hostname=mqttHost, port=tPort, tls=tTLS, transport=tTransport)
-        #save_log()
-    except:
-        print ("[INFO] Failure in sending data")
-        #time.sleep(12)
-    """
 
-    print('Sleep for 60sec')
+    try:
+        send_pi_data('pm25:' + str(pmt_2_5) + ',pm10:' + str(pmt_10) + ',t:' + time.strftime("%d.%m.%Y %H:%M:%S"))
+    except:
+        print ("[INFO] Failure in sending data to TTN")
+        time.sleep(1)
+
+    print('Sleep for 20sec')
     print(' ')
-    display.text('Sleep for 60sec', 0, 50, 1)
+    display.text('Sleep for 60sec', 0, 60, 1)
     display.show()
-    time.sleep(60)
+    time.sleep(20)
