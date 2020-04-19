@@ -1,3 +1,4 @@
+#!/usr/bin/env python
 import ttnkey
 import subprocess
 import time, json
@@ -23,6 +24,10 @@ display.fill(0)
 display.show()
 width = display.width
 height = display.height
+
+# GPS
+lat = 46.45343000
+lon = 6.21918400
 
 # JSON
 JSON_FILE = '/var/www/html/aqi.json'
@@ -164,13 +169,14 @@ while True:
     """
 
     # get SDS011 measures
-    lat=0
-    lon=0
+
+    # Get GPS
     #lat,lon = get_gps()
     pmt_2_5, pmt_10 = get_data()
-    aqi_2_5 = 0
-    aqi_10 = 0
-    #aqi_2_5, aqi_10 = conv_aqi(pmt_2_5, pmt_10)
+
+    # aqi_2_5 = 0
+    #aqi_10 = 0
+    aqi_2_5, aqi_10 = conv_aqi(pmt_2_5, pmt_10)
     # bat = get_bat()
     bat = 0
 
@@ -178,10 +184,9 @@ while True:
     print(time.strftime("%Y-%m-%d (%H:%M:%S)"), end='')
     print(f"    PM2.5: {pmt_2_5} µg/m3    ", end='')
     print(f"PM10: {pmt_10} µg/m3")
-    print(' ')
-    #print(time_now(), end='')
-    #print(f"    AQI (PMT2.5): {aqi_2_5}    ", end='')
-    #print(f"AQI(PMT10): {aqi_10}")
+    print(time.strftime("%Y-%m-%d (%H:%M:%S)"), end='')
+    print(f"    AQI (PMT2.5): {aqi_2_5}    ", end='')
+    print(f"AQI(PMT10): {aqi_10}")
 
     # a => pm2.5
     # b => pm10
