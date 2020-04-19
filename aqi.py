@@ -6,7 +6,7 @@ from datetime import datetime
 import psutil
 
 # SDS011
-from sds011 import *
+from sds011 import SDS011
 import aqi
 
 # OLED LCD
@@ -27,6 +27,10 @@ height = display.height
 # JSON
 JSON_FILE = '/var/www/html/aqi.json'
 
+# MQTT
+MQTT_HOST = ''
+MQTT_TOPIC = '/weather/particulatematter'
+
 # TinyLora
 from digitalio import DigitalInOut, Direction, Pull
 from adafruit_tinylora.adafruit_tinylora import TTN, TinyLoRa
@@ -38,8 +42,11 @@ irq = DigitalInOut(board.D5)
 rst = DigitalInOut(board.D25)
 
 # TTN Device Address, 4 Bytes, MSB
+devaddr = bytearray(config.devaddr)
 # TTN Network Key, 16 Bytes, MSB
+nwkey = bytearray(config.nwkey)
 # TTN Application Key, 16 Bytess, MSB
+app = bytearray(config.app)
 
 # Initialize ThingsNetwork configuration
 ttn_config = TTN(devaddr, nwkey, app, country='EU')
@@ -51,8 +58,11 @@ data_pkt_delay = 5.0
 
 #sds011
 sensor = SDS011("/dev/ttyUSB0", use_query_mode=True)
+
 print("SDS011 sensor info:")
 print(sensor)
+#print(sensor.device_id)
+
 """
 print("Device ID: ", sensor.device_id)
 print("Device firmware: ", sensor.firmware)
@@ -62,12 +72,14 @@ print(sensor.reportmode)
 """
 
 def get_data(n=5):
-        print('Measuring in 10sec')
+        print(' ')
+        print('[INFO] Measuring in 10sec')
+        print('[INFO] Waking up SDS011')
         sensor.sleep(sleep=False)
         pmt_2_5 = 0
         pmt_10 = 0
         time.sleep(10)
-        print('Measuring ' + str(n) + ' times')
+        print('[INFO] Measuring ' + str(n) + ' times')
         for i in range (n):
             x = sensor.query()
             pmt_2_5 = pmt_2_5 + x[0]
@@ -76,6 +88,7 @@ def get_data(n=5):
             time.sleep(2)
         pmt_2_5 = round(pmt_2_5/n, 1)
         pmt_10 = round(pmt_10/n, 1)
+        print('[INFO] SDS011 go to sleep')
         sensor.sleep(sleep=True)
         time.sleep(2)
         return pmt_2_5, pmt_10
@@ -97,7 +110,8 @@ def save_log():
 def send_pi_data(data):
     # Encode float as int
     print('data',data)
-    data = int(data * 100)
+    data = int(data)
+    #data.encode(ascii)
     print('data len',data)
     # Encode payload as bytes
     data_pkt[0] = (data >> 8) & 0xff
@@ -105,13 +119,22 @@ def send_pi_data(data):
     # Send data packet
     lora.send_data(data_pkt, len(data_pkt), lora.frame_counter)
     lora.frame_counter += 1
-
-    display.fill(0)
     display.text('Sent Data to TTN!',0 , 50, 1)
-
-    print('Data sent to TTN!')
     display.show()
     time.sleep(0.5)
+
+def send_data(data):
+    print('[INFO] Sending data')
+    data_pkt = bytearray(data, 'utf-8')
+    lora.send_data(data_pkt, len(data_pkt),lora.frame_counter)
+    lora.frame_counter += 1
+    time.sleep(0.5)
+
+def pub_mqtt(jsonrow):
+    cmd = ['mosquitto_pub', '-h', MQTT_HOST, '-t', MQTT_TOPIC, '-s']
+    print('Publishing using:', cmd)
+    with subprocess.Popen(cmd, shell=False, bufsize=0, stdin=subprocess.PIPE).stdin as f:
+        json.dump(jsonrow, f)
 
 """
 # NOT USED
@@ -129,14 +152,16 @@ while True:
     display.fill(0)
     display.show()
     display.text('ECO-SENSORS.CH', 0, 0, 1)
-    display.text('Measuring Air Quality', 0, 8, 1)
+    display.text('Smart Air Quality', 0, 8, 1)
     display.show()
 
+    """
     # read the raspberry pi cpu load
     cmd = "top -bn1 | grep load | awk '{printf \"%.1f\", $(NF-2)}'"
     CPU = subprocess.check_output(cmd, shell = True )
     CPU = float(CPU)
-    print('CPU load %' + str(CPU))
+    print('[INFO] CPU load %' + str(CPU))
+    """
 
     # get SDS011 measures
     lat=0
@@ -146,7 +171,10 @@ while True:
     aqi_2_5 = 0
     aqi_10 = 0
     #aqi_2_5, aqi_10 = conv_aqi(pmt_2_5, pmt_10)
-    print('------------------------------------')
+    # bat = get_bat()
+    bat = 0
+
+    print('---------------------------------------')
     print(time.strftime("%Y-%m-%d (%H:%M:%S)"), end='')
     print(f"    PM2.5: {pmt_2_5} µg/m3    ", end='')
     print(f"PM10: {pmt_10} µg/m3")
@@ -155,8 +183,22 @@ while True:
     #print(f"    AQI (PMT2.5): {aqi_2_5}    ", end='')
     #print(f"AQI(PMT10): {aqi_10}")
 
-    payload = 'a:' + str(pmt_2_5) + ',b:' + str(pmt_10) + ',c:' + str(aqi_2_5) + ',d:' + str(aqi_10) + ',e:' + str(lat) + ',f:' + str(lon) + ',g:' + str(time.strftime("%Y-%m-%d %H:%M:%S")) 
-    payload.encode('ascii')
+    # a => pm2.5
+    # b => pm10
+    # c => aqi2.5
+    # d => aqi10
+    # e => lat
+    # f => lon
+    # g => time
+    # h => bat
+
+    # get date and time
+    tnow = datetime.now()
+    timestamp_now = datetime.timestamp(tnow)
+
+    # Build payload
+    payload = 'a' + str(int(pmt_2_5 * 100)) + 'b' + str(int(pmt_10 * 100)) + 'c' + str(int(aqi_2_5 * 100)) + 'd' + str(int(aqi_10 * 100)) + 'e' + str(int(lat * 10000)) + 'f' + str(int(lon * 10000)) + 'g' + str(timestamp_now) + 'h' + str(int(bat * 100))
+    print('[DEBUG] payload:' + payload)
 
     display.text(str(pmt_2_5) + 'µg/m3', 0, 25, 1)
     display.text(str(pmt_10) + 'µg/m3', 0, 35, 1)
@@ -178,25 +220,28 @@ while True:
         data.pop(0)
 
     # append new values
-    jsonrow = {'pm25': pmt_2_5, 'pm10': pmt_10, 'time': time.strftime("%Y-%m-%d %H:%M:%S")}
-#    print(jsonrow)
+    jsonrow = {'pm25': pmt_2_5, 'pm10': pmt_10, 'time': timestamp_now}
     data.append(jsonrow)
 
     # save it
     with open(JSON_FILE, 'w') as outfile:
         json.dump(data, outfile)
 
-    # Sent to TTN
+    #if MQTT_HOST != '':
+    #    pub_mqtt(jsonrow)
 
+    # Sent to TTN
     try:
-        send_pi_data(payload)
+        send_data(payload)
+        print('[INFO] Data sent to TTN')
+        display.text('Data sent to TTN!',0 , 50, 1)
     except NameError:
-        print ("[INFO] Failure in sending data to TTN")
-        print(e)
+        print ("[ERROR] Failure in sending data to TTN")
+        display.text('[ERROR] Failure in sending data to TTN')
         time.sleep(1)
 
-    print('Sleep for 20sec')
+    print('[INF=] Sleep for 20sec')
     print(' ')
-    display.text('Sleep for 60sec', 0, 60, 1)
+    display.text('Sleep for 20sec', 0, 60, 1)
     display.show()
     time.sleep(20)
