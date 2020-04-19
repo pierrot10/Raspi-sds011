@@ -1,4 +1,4 @@
-import config
+import ttnkey
 import subprocess
 import time, json
 from datetime import datetime
@@ -42,11 +42,11 @@ irq = DigitalInOut(board.D5)
 rst = DigitalInOut(board.D25)
 
 # TTN Device Address, 4 Bytes, MSB
-devaddr = bytearray(config.devaddr)
+devaddr = bytearray(ttnkey.devaddr)
 # TTN Network Key, 16 Bytes, MSB
-nwkey = bytearray(config.nwkey)
+nwkey = bytearray(ttnkey.nwkey)
 # TTN Application Key, 16 Bytess, MSB
-app = bytearray(config.app)
+app = bytearray(ttnkey.app)
 
 # Initialize ThingsNetwork configuration
 ttn_config = TTN(devaddr, nwkey, app, country='EU')
@@ -200,8 +200,8 @@ while True:
     payload = 'a' + str(int(pmt_2_5 * 100)) + 'b' + str(int(pmt_10 * 100)) + 'c' + str(int(aqi_2_5 * 100)) + 'd' + str(int(aqi_10 * 100)) + 'e' + str(int(lat * 10000)) + 'f' + str(int(lon * 10000)) + 'g' + str(timestamp_now) + 'h' + str(int(bat * 100))
     print('[DEBUG] payload:' + payload)
 
-    display.text(str(pmt_2_5) + 'µg/m3', 0, 25, 1)
-    display.text(str(pmt_10) + 'µg/m3', 0, 35, 1)
+    display.text(str(pmt_2_5) + 'µg/m3', 0, 20, 1)
+    display.text(str(pmt_10) + 'µg/m3', 0, 30, 1)
     display.show()
     #print(aqi_2_5)
     #print(aqi_10))
@@ -234,14 +234,14 @@ while True:
     try:
         send_data(payload)
         print('[INFO] Data sent to TTN')
-        display.text('Data sent to TTN!',0 , 50, 1)
+        display.text('Data sent to TTN!',0 , 45, 1)
     except NameError:
         print ("[ERROR] Failure in sending data to TTN")
         display.text('[ERROR] Failure in sending data to TTN')
         time.sleep(1)
 
-    print('[INF=] Sleep for 20sec')
+    print('[INFO] Sleep for 20sec')
     print(' ')
-    display.text('Sleep for 20sec', 0, 60, 1)
+    display.text('Sleep for 20sec', 0, 55, 1)
     display.show()
     time.sleep(20)
