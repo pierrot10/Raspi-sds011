@@ -2,9 +2,16 @@
 import ttnkey
 import subprocess
 import time, json
+#import RPi.GPIO as GPIO
 from datetime import datetime
 #import paho.mqtt.publish as publish
 import psutil
+
+#pin
+#gps_power = board.D17
+gps_power = 17
+#GPIO.setmode(GPIO.BCM) # Broadcom pin-numbering scheme
+#GPIO.setup(gps_power, GPIO.OUT) # pin set as output
 
 # SDS011
 from sds011 import SDS011
@@ -26,8 +33,10 @@ width = display.width
 height = display.height
 
 # GPS
-lat = 46.45343000
-lon = 6.21918400
+import pynmea2, serial
+#GPIO.output(gps_power, 0) #0 OFF, 1 ON
+#lat = 46.45343000
+#lon = 6.21918400
 
 # JSON
 JSON_FILE = '/var/www/html/aqi.json'
@@ -65,8 +74,9 @@ data_pkt_delay = 5.0
 sensor = SDS011("/dev/ttyUSB0", use_query_mode=True)
 
 print("SDS011 sensor info:")
-print(sensor)
-#print(sensor.device_id)
+#print(sensor)
+#print(sensor.deviceid)
+#print("Device firmware: ", sensor.firmware)
 
 """
 print("Device ID: ", sensor.device_id)
@@ -78,19 +88,27 @@ print(sensor.reportmode)
 
 def get_data(n=5):
         print(' ')
-        print('[INFO] Measuring in 10sec')
         print('[INFO] Waking up SDS011')
+        display.text('Waking up SDS011', 0, 18, 1)
         sensor.sleep(sleep=False)
         pmt_2_5 = 0
         pmt_10 = 0
+        display.text('Wait ' + str(n) + 's to stabilize', 0, 28, 1)
+        display.show()
+        print('[INFO] Wait 30s to stabilize ...')
         time.sleep(10)
         print('[INFO] Measuring ' + str(n) + ' times')
+        display.text('Mesuring ' + str(n) + 'times', 0, 38, 1)
+        display.show()
         for i in range (n):
             x = sensor.query()
             pmt_2_5 = pmt_2_5 + x[0]
             pmt_10 = pmt_10 + x[1]
             print(str(i) + '. pm2.5: ' + str(pmt_2_5) + ' µg/m3  pm10:' + str(pmt_10) + ' µg/m3')
-            time.sleep(2)
+
+            display.text('|', i, 48, 1)
+            display.show()
+            time.sleep(1)
         pmt_2_5 = round(pmt_2_5/n, 1)
         pmt_10 = round(pmt_10/n, 1)
         print('[INFO] SDS011 go to sleep')
@@ -124,8 +142,8 @@ def send_pi_data(data):
     # Send data packet
     lora.send_data(data_pkt, len(data_pkt), lora.frame_counter)
     lora.frame_counter += 1
-    display.text('Sent Data to TTN!',0 , 50, 1)
-    display.show()
+    #display.text('Sent Data to TTN!',0 , 50, 1)
+    #display.show()
     time.sleep(0.5)
 
 def send_data(data):
@@ -140,6 +158,68 @@ def pub_mqtt(jsonrow):
     print('Publishing using:', cmd)
     with subprocess.Popen(cmd, shell=False, bufsize=0, stdin=subprocess.PIPE).stdin as f:
         json.dump(jsonrow, f)
+
+# NOT USED
+def parseGPS(data):
+    print ("raw:", data) #prints raw data
+    print(data[0:6])
+    sentence = data[0:6]
+    if sentence.decode('UTF-8') == "$GPRMC":
+        print('2')
+        spdata = data.decode('UTF-8')
+        sdata = spdata.split(",")
+        if sdata[2] == 'V':
+            print ('no satellite data available')
+            return
+        print('---Parsing GPRMC---')
+        time = sdata[1][0:2] + ":" + sdata[1][2:4] + ":" + sdata[1][4:6]
+        lat = decode(sdata[3]) #latitude
+        dirLat = sdata[4]      #latitude direction N/S
+        lon = decode(sdata[5]) #longitute
+        dirLon = sdata[6]      #longitude direction E/W
+        speed = sdata[7]       #Speed in knots
+        trCourse = sdata[8]    #True course
+        date = sdata[9][0:2] + "/" + sdata[9][2:4] + "/" + sdata[9][4:6]#date
+ 
+        print("time : %s, latitude : %s(%s), longitude : %s(%s), speed : %s, True Course : %s, Date : %s" %  (time,lat,dirLat,lon,dirLon,speed,trCourse,date))
+        return lat,lon,date
+
+    #if str.find('GGA') > 0:
+        #msg = pynmea2.parse(str)
+        #msg.latitude
+        #print "Timestamp: %s -- Lat: %s %s -- Lon: %s %s -- Altitude: %s %s -- Satellites: %s" % (msg.timestamp,msg.lat,msg.lat_dir,msg.lon,msg.lon_dir,msg.altitude,msg.altitude_units,msg.num_sats)
+
+# NOT USED
+def decode(coord):
+    #Converts DDDMM.MMMMM > DD deg MM.MMMMM min
+    x = coord.split(".")
+    head = x[0]
+    tail = x[1]
+    deg = head[0:-2]
+    min = head[-2:]
+    return deg + " deg " + min + "." + tail + " min"
+
+def get_gps():
+    #GPIO.output(gps_power, 1)
+    try:
+        with serial.Serial('/dev/ttyS0', baudrate=9600, timeout=1) as ser:
+            while True:
+                data = ser.readline()
+                sdata=data[0:6].decode('UTF-8')
+                if sdata == "$GPRMC":
+                    mnea  = pynmea2.parse(data.decode('UTF-8'))
+                    print(mnea)
+                    print(mnea.latitude)
+                    print(mnea.longitude)
+                    return mnea.latitude, mnea.longitude
+                    break
+
+                # NOT USED
+                # parseGPS(data)
+
+    except Exception as e:
+        print('Error reading serial port:' + e)
+
 
 """
 # NOT USED
@@ -168,10 +248,13 @@ while True:
     print('[INFO] CPU load %' + str(CPU))
     """
 
-    # get SDS011 measures
+    # GPS
+    #lat, lon = get_gps()
+    #print('lat/lon:' + str(lat) + ' ' + str(lon))
+    lat=46.1234
+    lon=6.1234
 
-    # Get GPS
-    #lat,lon = get_gps()
+    # get SDS011 measures
     pmt_2_5, pmt_10 = get_data()
 
     # aqi_2_5 = 0
@@ -204,9 +287,17 @@ while True:
     # Build payload
     payload = 'a' + str(int(pmt_2_5 * 100)) + 'b' + str(int(pmt_10 * 100)) + 'c' + str(int(aqi_2_5 * 100)) + 'd' + str(int(aqi_10 * 100)) + 'e' + str(int(lat * 10000)) + 'f' + str(int(lon * 10000)) + 'g' + str(timestamp_now) + 'h' + str(int(bat * 100))
     print('[DEBUG] payload:' + payload)
+    print(' ')
 
-    display.text(str(pmt_2_5) + 'µg/m3', 0, 20, 1)
-    display.text(str(pmt_10) + 'µg/m3', 0, 30, 1)
+    display.fill(0)
+    display.show()
+    display.text('ECO-SENSORS.CH', 0, 0, 1)
+    display.text('Smart Air Quality', 0, 8, 1)
+
+    display.text('PM2.5 :' + str(pmt_2_5) + 'µg/m3', 0, 18, 1)
+    display.text('PM10  :' + str(pmt_10) + 'µg/m3', 0, 28, 1)
+    display.text('AQI2.5:' + str(aqi_2_5) + 'ppm', 0, 38, 1)
+    display.text('AQI10 :' + str(aqi_10) + 'ppm', 0, 48,1)
     display.show()
     #print(aqi_2_5)
     #print(aqi_10))
@@ -239,14 +330,17 @@ while True:
     try:
         send_data(payload)
         print('[INFO] Data sent to TTN')
-        display.text('Data sent to TTN!',0 , 45, 1)
+        #display.text('Data sent to TTN!',0 , 55, 1)
     except NameError:
         print ("[ERROR] Failure in sending data to TTN")
-        display.text('[ERROR] Failure in sending data to TTN')
+        display.text('[ERROR] Failure in sending data to TTN',0,55,1)
+        display.show()
         time.sleep(1)
 
-    print('[INFO] Sleep for 20sec')
+    sl=60
+    print('[INFO] Sleep for ' + str(sl)  + ' sec')
     print(' ')
-    display.text('Sleep for 20sec', 0, 55, 1)
-    display.show()
-    time.sleep(20)
+    #display.text('Sleep for ' + str(sl) +' sec', 0, 60, 1)
+    #display.show()
+    #GPIO.output(gps_power, 0)
+    time.sleep(sl)
