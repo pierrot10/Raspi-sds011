@@ -1,17 +1,11 @@
-#!/usr/bin/env python
+#get!/usr/bin/env python
 import ttnkey
 import subprocess
 import time, json
-#import RPi.GPIO as GPIO
+from digitalio import DigitalInOut, Direction, Pull
 from datetime import datetime
 #import paho.mqtt.publish as publish
 import psutil
-
-#pin
-#gps_power = board.D17
-gps_power = 17
-#GPIO.setmode(GPIO.BCM) # Broadcom pin-numbering scheme
-#GPIO.setup(gps_power, GPIO.OUT) # pin set as output
 
 # SDS011
 from sds011 import SDS011
@@ -31,12 +25,13 @@ display.fill(0)
 display.show()
 width = display.width
 height = display.height
+display.poweroff()
 
 # GPS
 import pynmea2, serial
-#GPIO.output(gps_power, 0) #0 OFF, 1 ON
-#lat = 46.45343000
-#lon = 6.21918400
+gps_power = DigitalInOut(board.D12)
+gps_power.direction = Direction.OUTPUT
+gps_power.value = False
 
 # JSON
 JSON_FILE = '/var/www/html/aqi.json'
@@ -45,8 +40,8 @@ JSON_FILE = '/var/www/html/aqi.json'
 MQTT_HOST = ''
 MQTT_TOPIC = '/weather/particulatematter'
 
+
 # TinyLora
-from digitalio import DigitalInOut, Direction, Pull
 from adafruit_tinylora.adafruit_tinylora import TTN, TinyLoRa
 
 # TinyLoRa Configuration
@@ -86,17 +81,18 @@ print(sensor.workstate)
 print(sensor.reportmode)
 """
 
-def get_data(n=5):
+def get_data(n=10):
         print(' ')
         print('[INFO] Waking up SDS011')
         display.text('Waking up SDS011', 0, 18, 1)
         sensor.sleep(sleep=False)
         pmt_2_5 = 0
         pmt_10 = 0
-        display.text('Wait ' + str(n) + 's to stabilize', 0, 28, 1)
+        stab = 30
+        display.text('Wait ' + str(stab) + 's to stabilize', 0, 28, 1)
         display.show()
-        print('[INFO] Wait 30s to stabilize ...')
-        time.sleep(10)
+        print('[INFO] Wait ' + str(stab) + ' to stabilize ...')
+        time.sleep(stab)
         print('[INFO] Measuring ' + str(n) + ' times')
         display.text('Mesuring ' + str(n) + 'times', 0, 38, 1)
         display.show()
@@ -130,6 +126,7 @@ def save_log():
     log.close()
 """
 
+# NOT USED
 def send_pi_data(data):
     # Encode float as int
     print('data',data)
@@ -200,26 +197,50 @@ def decode(coord):
     return deg + " deg " + min + "." + tail + " min"
 
 def get_gps():
-    #GPIO.output(gps_power, 1)
-    try:
-        with serial.Serial('/dev/ttyS0', baudrate=9600, timeout=1) as ser:
-            while True:
-                data = ser.readline()
-                sdata=data[0:6].decode('UTF-8')
-                if sdata == "$GPRMC":
-                    mnea  = pynmea2.parse(data.decode('UTF-8'))
-                    print(mnea)
-                    print(mnea.latitude)
-                    print(mnea.longitude)
-                    return mnea.latitude, mnea.longitude
-                    break
+    print('[INFO] Getting GPS')
 
-                # NOT USED
-                # parseGPS(data)
+    try:
+        with serial.Serial('/dev/ttyAMA0', baudrate=9600, timeout=1) as ser:
+            gpsOk = False
+
+            #print('[INFO] Warmup GPS')
+            for i in range(100):
+                warm = ser.readline()
+                print(warm)
+
+            # read 20 lines from the serial output
+            for i in range(20):
+                #print('Read ' + str(i))
+                try:
+                    data = ser.readline()
+                    sdata=data[0:6].decode('UTF-8')
+                    if sdata == "$GPRMC":
+                        nmea  = pynmea2.parse(data.decode('UTF-8'),check=True)
+                        gpsOk = True
+                        break
+                except serial.SerialException as e:
+                    print('Device error: {}'.format(e))
+                    break
+                except pynmea2.ParseError as e:
+                    print('Parse error: {}'.format(e))
+                    continue
+
+            # NOT USED
+            # parseGPS(data)
 
     except Exception as e:
-        print('Error reading serial port:' + e)
+        print('Error reading serial port:' , e)
 
+   # Power off GPS
+    print('[INFO] Turn OFF GPS')
+    gps_power.value = False
+
+    if gpsOk:
+        print('[INFO] OK')
+        return nmea.latitude, nmea.longitude
+    else:
+        print('[ERROR] Cannot find GPRMC sentences')
+        return 0.0,0.0
 
 """
 # NOT USED
@@ -234,6 +255,7 @@ tTLS = None
 """
 
 while True:
+    display.poweron()
     display.fill(0)
     display.show()
     display.text('ECO-SENSORS.CH', 0, 0, 1)
@@ -249,10 +271,12 @@ while True:
     """
 
     # GPS
+    print('[INFO] Turn ON GPS' )
+    gps_power.value = True
     #lat, lon = get_gps()
     #print('lat/lon:' + str(lat) + ' ' + str(lon))
-    lat=46.1234
-    lon=6.1234
+    #lat=46.1234
+    #lon=6.1234
 
     # get SDS011 measures
     pmt_2_5, pmt_10 = get_data()
@@ -270,6 +294,9 @@ while True:
     print(time.strftime("%Y-%m-%d (%H:%M:%S)"), end='')
     print(f"    AQI (PMT2.5): {aqi_2_5}    ", end='')
     print(f"AQI(PMT10): {aqi_10}")
+
+    lat, lon = get_gps()
+    print('lat/lon:' + str(lat) + ' ' + str(lon))
 
     # a => pm2.5
     # b => pm10
@@ -337,10 +364,14 @@ while True:
         display.show()
         time.sleep(1)
 
-    sl=60
+    #sl=3600
+    sl=1800
     print('[INFO] Sleep for ' + str(sl)  + ' sec')
     print(' ')
     #display.text('Sleep for ' + str(sl) +' sec', 0, 60, 1)
     #display.show()
     #GPIO.output(gps_power, 0)
-    time.sleep(sl)
+    time.sleep(10)
+    # Turn off the OLD LCD
+    display.poweroff()
+    time.sleep(sl-10)
