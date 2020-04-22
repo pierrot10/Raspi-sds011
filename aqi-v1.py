@@ -12,26 +12,40 @@ from sds011 import SDS011
 import aqi
 
 # OLED LCD
-import adafruit_ssd1306, board, busio
+OLED = False
+if OLED:
+    import adafruit_ssd1306
 
+import board, busio
 # Create the I2C interface.
-i2c = busio.I2C(board.SCL, board.SDA)
+if OLED:
+    i2c = busio.I2C(board.SCL, board.SDA)
+
+#batteries
+bat1 = 1
+bat2 = 2
+bat3 = 3
 
 # 128x64 OLED Display
-display = adafruit_ssd1306.SSD1306_I2C(128, 64, i2c)
+if OLED:
+    display = adafruit_ssd1306.SSD1306_I2C(128, 64, i2c)
 
-# Clear the display.
-display.fill(0)
-display.show()
-width = display.width
-height = display.height
-display.poweroff()
+    # Clear the display.
+    display.fill(0)
+    display.show()
+    width = display.width
+    height = display.height
+    display.poweroff()
+
 
 # GPS
 import pynmea2, serial
+GPS = False   # Active or Not GPS
 gps_power = DigitalInOut(board.D12)
 gps_power.direction = Direction.OUTPUT
 gps_power.value = False
+lat=0
+lon=0
 
 # JSON
 JSON_FILE = '/var/www/html/aqi.json'
@@ -68,7 +82,7 @@ data_pkt_delay = 5.0
 #sds011
 sensor = SDS011("/dev/ttyUSB0", use_query_mode=True)
 
-print("SDS011 sensor info:")
+#print("SDS011 sensor info:")
 #print(sensor)
 #print(sensor.deviceid)
 #print("Device firmware: ", sensor.firmware)
@@ -81,29 +95,34 @@ print(sensor.workstate)
 print(sensor.reportmode)
 """
 
-def get_data(n=10):
+def get_data(n=3):
         print(' ')
         print('[INFO] Waking up SDS011')
-        display.text('Waking up SDS011', 0, 18, 1)
+
+        if OLED:
+            display.text('Waking up SDS011', 0, 18, 1)
+
         sensor.sleep(sleep=False)
         pmt_2_5 = 0
         pmt_10 = 0
-        stab = 30
-        display.text('Wait ' + str(stab) + 's to stabilize', 0, 28, 1)
-        display.show()
-        print('[INFO] Wait ' + str(stab) + ' to stabilize ...')
+        stab = 5
+        if OLED:
+            display.text('Wait ' + str(stab) + 's to stabilize', 0, 28, 1)
+            display.show()
+        print('[INFO] Wait ' + str(stab) + 's to stabilize ...')
         time.sleep(stab)
         print('[INFO] Measuring ' + str(n) + ' times')
-        display.text('Mesuring ' + str(n) + 'times', 0, 38, 1)
-        display.show()
+        if OLED:
+            display.text('Mesuring ' + str(n) + 'times', 0, 38, 1)
+            display.show()
         for i in range (n):
             x = sensor.query()
             pmt_2_5 = pmt_2_5 + x[0]
             pmt_10 = pmt_10 + x[1]
             print(str(i) + '. pm2.5: ' + str(pmt_2_5) + ' µg/m3  pm10:' + str(pmt_10) + ' µg/m3')
-
-            display.text('|', i, 48, 1)
-            display.show()
+            if OLED:
+                display.text('|', i, 48, 1)
+                display.show()
             time.sleep(1)
         pmt_2_5 = round(pmt_2_5/n, 1)
         pmt_10 = round(pmt_10/n, 1)
@@ -139,14 +158,18 @@ def send_pi_data(data):
     # Send data packet
     lora.send_data(data_pkt, len(data_pkt), lora.frame_counter)
     lora.frame_counter += 1
-    #display.text('Sent Data to TTN!',0 , 50, 1)
-    #display.show()
+    #if OLED:
+        #display.text('Sent Data to TTN!',0 , 50, 1)
+        #display.show()
     time.sleep(0.5)
 
 def send_data(data):
     print('[INFO] Sending data')
     data_pkt = bytearray(data, 'utf-8')
-    lora.send_data(data_pkt, len(data_pkt),lora.frame_counter)
+    try:
+        lora.send_data(data_pkt, len(data_pkt),lora.frame_counter)
+    except:
+        print("Something went wrong")
     lora.frame_counter += 1
     time.sleep(0.5)
 
@@ -195,6 +218,12 @@ def decode(coord):
     deg = head[0:-2]
     min = head[-2:]
     return deg + " deg " + min + "." + tail + " min"
+
+def get_batt():
+    ba1 = 0.0
+    ba2 = 0.0
+    ba3 = 0.0
+    return ba1, ba2, ba3
 
 def get_gps():
     print('[INFO] Getting GPS')
@@ -255,12 +284,13 @@ tTLS = None
 """
 
 while True:
-    display.poweron()
-    display.fill(0)
-    display.show()
-    display.text('ECO-SENSORS.CH', 0, 0, 1)
-    display.text('Smart Air Quality', 0, 8, 1)
-    display.show()
+    if OLED:
+        display.poweron()
+        display.fill(0)
+        display.show()
+        display.text('ECO-SENSORS.CH', 0, 0, 1)
+        display.text('Smart Air Quality', 0, 8, 1)
+        display.show()
 
     """
     # read the raspberry pi cpu load
@@ -271,12 +301,13 @@ while True:
     """
 
     # GPS
-    print('[INFO] Turn ON GPS' )
-    gps_power.value = True
-    #lat, lon = get_gps()
-    #print('lat/lon:' + str(lat) + ' ' + str(lon))
-    #lat=46.1234
-    #lon=6.1234
+    if GPS:
+        print('[INFO] Turn ON GPS' )
+        gps_power.value = True
+        #lat, lon = get_gps()
+        #print('lat/lon:' + str(lat) + ' ' + str(lon))
+        #lat=46.1234
+        #lon=6.1234
 
     # get SDS011 measures
     pmt_2_5, pmt_10 = get_data()
@@ -285,7 +316,6 @@ while True:
     #aqi_10 = 0
     aqi_2_5, aqi_10 = conv_aqi(pmt_2_5, pmt_10)
     # bat = get_bat()
-    bat = 0
 
     print('---------------------------------------')
     print(time.strftime("%Y-%m-%d (%H:%M:%S)"), end='')
@@ -295,8 +325,9 @@ while True:
     print(f"    AQI (PMT2.5): {aqi_2_5}    ", end='')
     print(f"AQI(PMT10): {aqi_10}")
 
-    lat, lon = get_gps()
-    print('lat/lon:' + str(lat) + ' ' + str(lon))
+    if GPS:
+        lat, lon = get_gps()
+        print('lat/lon:' + str(lat) + ' ' + str(lon))
 
     # a => pm2.5
     # b => pm10
@@ -305,27 +336,30 @@ while True:
     # e => lat
     # f => lon
     # g => time
-    # h => bat
+    # h => bat1
+    # i => bat2
+    # j => bat3
 
     # get date and time
     tnow = datetime.now()
     timestamp_now = datetime.timestamp(tnow)
 
     # Build payload
-    payload = 'a' + str(int(pmt_2_5 * 100)) + 'b' + str(int(pmt_10 * 100)) + 'c' + str(int(aqi_2_5 * 100)) + 'd' + str(int(aqi_10 * 100)) + 'e' + str(int(lat * 10000)) + 'f' + str(int(lon * 10000)) + 'g' + str(timestamp_now) + 'h' + str(int(bat * 100))
+    payload = 'a' + str(int(pmt_2_5 * 100)) + 'b' + str(int(pmt_10 * 100)) + 'c' + str(int(aqi_2_5 * 100)) + 'd' + str(int(aqi_10 * 100)) + 'e' + str(int(lat * 10000)) + 'f' + str(int(lon * 10000)) + 'g' + str(timestamp_now) + 'h' + str(int(bat1 * 100)) + 'i' + str(int(bat2 * 100)) + 'j' + str(int(bat3 * 100))
     print('[DEBUG] payload:' + payload)
     print(' ')
 
-    display.fill(0)
-    display.show()
-    display.text('ECO-SENSORS.CH', 0, 0, 1)
-    display.text('Smart Air Quality', 0, 8, 1)
+    if OLED:
+        display.fill(0)
+        display.show()
+        display.text('ECO-SENSORS.CH', 0, 0, 1)
+        display.text('Smart Air Quality', 0, 8, 1)
 
-    display.text('PM2.5 :' + str(pmt_2_5) + 'µg/m3', 0, 18, 1)
-    display.text('PM10  :' + str(pmt_10) + 'µg/m3', 0, 28, 1)
-    display.text('AQI2.5:' + str(aqi_2_5) + 'ppm', 0, 38, 1)
-    display.text('AQI10 :' + str(aqi_10) + 'ppm', 0, 48,1)
-    display.show()
+        display.text('PM2.5 :' + str(pmt_2_5) + 'µg/m3', 0, 18, 1)
+        display.text('PM10  :' + str(pmt_10) + 'µg/m3', 0, 28, 1)
+        display.text('AQI2.5:' + str(aqi_2_5) + 'ppm', 0, 38, 1)
+        display.text('AQI10 :' + str(aqi_10) + 'ppm', 0, 48,1)
+        display.show()
     #print(aqi_2_5)
     #print(aqi_10))
     #tPayload = "field1=" + str(pmt_2_5)+ "&field2=" + str(aqi_2_5)+ "&field3=" + str(pmt_10)+ "&field4=" + str(aqi_10)
@@ -343,7 +377,8 @@ while True:
         data.pop(0)
 
     # append new values
-    jsonrow = {'pm25': pmt_2_5, 'pm10': pmt_10, 'time': timestamp_now}
+    #'aqi25': aqi_2_5, 'aqi10': aqi_10, 'lat': lat, 'lon': lon, 'bat1': bat1, 'bat2': bat2, 'bat3': bat3,
+    jsonrow = {'pm25': pmt_2_5, 'pm10': pmt_10, 'aq25': str(aqi_2_5), 'aq10': str(aqi_10), 'lat': lat, 'lon': lon, 'ba1': bat1, 'ba2': bat2, 'ba3': bat3, 'time': timestamp_now}
     data.append(jsonrow)
 
     # save it
@@ -357,21 +392,23 @@ while True:
     try:
         send_data(payload)
         print('[INFO] Data sent to TTN')
-        #display.text('Data sent to TTN!',0 , 55, 1)
+        #if OLED:
+            #display.text('Data sent to TTN!',0 , 55, 1)
     except NameError:
         print ("[ERROR] Failure in sending data to TTN")
-        display.text('[ERROR] Failure in sending data to TTN',0,55,1)
-        display.show()
+        if OLED:
+            display.text('[ERROR] Failure in sending data to TTN',0,55,1)
+            display.show()
         time.sleep(1)
 
     #sl=3600
     sl=1800
     print('[INFO] Sleep for ' + str(sl)  + ' sec')
     print(' ')
-    #display.text('Sleep for ' + str(sl) +' sec', 0, 60, 1)
-    #display.show()
-    #GPIO.output(gps_power, 0)
+
     time.sleep(10)
+
     # Turn off the OLD LCD
-    display.poweroff()
+    if OLED:
+        display.poweroff()
     time.sleep(sl-10)
