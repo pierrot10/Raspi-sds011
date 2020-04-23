@@ -22,9 +22,9 @@ if OLED:
     i2c = busio.I2C(board.SCL, board.SDA)
 
 #batteries
-bat1 = 1
-bat2 = 2
-bat3 = 3
+bat1 = 0
+bat2 = 0
+bat3 = 0
 
 # 128x64 OLED Display
 if OLED:
