@@ -2,17 +2,27 @@
 import ttnkey
 import subprocess
 import time, json
+import smbus
 from digitalio import DigitalInOut, Direction, Pull
 from datetime import datetime
 #import paho.mqtt.publish as publish
 import psutil
 
+# MQTT
+#import subprocess
+
 # SDS011
 from sds011 import SDS011
 import aqi
 
+# zerotogo board
+z2g = True
+i2c_ch = 1
+bus = smbus.SMBus(i2c_ch)
+addr_z2g = 0x24
+
 # OLED LCD
-OLED = False
+OLED = True
 if OLED:
     import adafruit_ssd1306
 
@@ -20,6 +30,7 @@ import board, busio
 # Create the I2C interface.
 if OLED:
     i2c = busio.I2C(board.SCL, board.SDA)
+
 
 #batteries
 bat1 = 0
@@ -40,7 +51,7 @@ if OLED:
 
 # GPS
 import pynmea2, serial
-GPS = False   # Active or Not GPS
+GPS = True   # Active or Not GPS
 gps_power = DigitalInOut(board.D12)
 gps_power.direction = Direction.OUTPUT
 gps_power.value = False
@@ -49,6 +60,7 @@ lon=0
 
 # JSON
 JSON_FILE = '/var/www/html/aqi.json'
+
 
 # MQTT
 MQTT_HOST = ''
@@ -96,7 +108,6 @@ print(sensor.reportmode)
 """
 
 def get_data(n=3):
-        print(' ')
         print('[INFO] Waking up SDS011')
 
         if OLED:
@@ -105,16 +116,20 @@ def get_data(n=3):
         sensor.sleep(sleep=False)
         pmt_2_5 = 0
         pmt_10 = 0
-        stab = 5
+        stab = 3
+
         if OLED:
             display.text('Wait ' + str(stab) + 's to stabilize', 0, 28, 1)
             display.show()
+
         print('[INFO] Wait ' + str(stab) + 's to stabilize ...')
         time.sleep(stab)
         print('[INFO] Measuring ' + str(n) + ' times')
+
         if OLED:
             display.text('Mesuring ' + str(n) + 'times', 0, 38, 1)
             display.show()
+
         for i in range (n):
             x = sensor.query()
             pmt_2_5 = pmt_2_5 + x[0]
@@ -124,8 +139,10 @@ def get_data(n=3):
                 display.text('|', i, 48, 1)
                 display.show()
             time.sleep(1)
+
         pmt_2_5 = round(pmt_2_5/n, 1)
         pmt_10 = round(pmt_10/n, 1)
+
         print('[INFO] SDS011 go to sleep')
         sensor.sleep(sleep=True)
         time.sleep(2)
@@ -168,9 +185,10 @@ def send_data(data):
     data_pkt = bytearray(data, 'utf-8')
     try:
         lora.send_data(data_pkt, len(data_pkt),lora.frame_counter)
+        lora.frame_counter += 1
     except:
         print("Something went wrong")
-    lora.frame_counter += 1
+
     time.sleep(0.5)
 
 def pub_mqtt(jsonrow):
@@ -178,6 +196,7 @@ def pub_mqtt(jsonrow):
     print('Publishing using:', cmd)
     with subprocess.Popen(cmd, shell=False, bufsize=0, stdin=subprocess.PIPE).stdin as f:
         json.dump(jsonrow, f)
+
 
 # NOT USED
 def parseGPS(data):
@@ -219,11 +238,28 @@ def decode(coord):
     min = head[-2:]
     return deg + " deg " + min + "." + tail + " min"
 
-def get_batt():
-    ba1 = 0.0
-    ba2 = 0.0
-    ba3 = 0.0
-    return ba1, ba2, ba3
+# that function only works for the  zero2go board
+def get_batt_z2g():
+    if z2g:
+        # Channel-A (input 1)
+        val1 = bus.read_i2c_block_data(addr_z2g, 1)
+        val2 = bus.read_i2c_block_data(addr_z2g, 2)
+        ba1 = val1[0] + val2[0]/100
+
+        # Channel-B (input 2)
+        val3 = bus.read_i2c_block_data(addr_z2g, 3)
+        val4 = bus.read_i2c_block_data(addr_z2g, 4)
+        ba2 = val3[0] + val4[0]/100
+
+        # Channel-B (input 3)
+        val5 = bus.read_i2c_block_data(addr_z2g, 5)
+        val6 = bus.read_i2c_block_data(addr_z2g, 6)
+        ba3 = val5[0] + val6[0]/100
+
+        return ba1, ba2, ba3
+    else:
+        print('[INFO] zero2go not active')
+        return 0,0,0
 
 def get_gps():
     print('[INFO] Getting GPS')
@@ -309,13 +345,18 @@ while True:
         #lat=46.1234
         #lon=6.1234
 
+
+    # Get batteries level with zero2go board
+    if z2g:
+        print('[INFO] get battery levels')
+        bat1, bat2, bat3 = get_batt_z2g()
+        print('Bat1:', bat1)
+        print('Bat2:', bat2)
+        print('Bat3:', bat3)
+
     # get SDS011 measures
     pmt_2_5, pmt_10 = get_data()
-
-    # aqi_2_5 = 0
-    #aqi_10 = 0
     aqi_2_5, aqi_10 = conv_aqi(pmt_2_5, pmt_10)
-    # bat = get_bat()
 
     print('---------------------------------------')
     print(time.strftime("%Y-%m-%d (%H:%M:%S)"), end='')
@@ -325,7 +366,8 @@ while True:
     print(f"    AQI (PMT2.5): {aqi_2_5}    ", end='')
     print(f"AQI(PMT10): {aqi_10}")
 
-    if GPS:
+     if GPS:
+        print('[INFO] Get GPS')
         lat, lon = get_gps()
         print('lat/lon:' + str(lat) + ' ' + str(lon))
 
@@ -387,6 +429,7 @@ while True:
 
     #if MQTT_HOST != '':
     #    pub_mqtt(jsonrow)
+
 
     # Sent to TTN
     try:
